@@ -38,17 +38,36 @@
 本 Skill 在 Agent 启动时自动加载，配合 `AgentKernel` 使用效果最佳。
 
 ```python
-from agent_kernel import AgentKernel
+from AnchorKernel_Lantern import AgentKernel
 
 kernel = AgentKernel()
 
-# 首轮对话
-payload = kernel.build_payload("用户输入", history=[], is_first_turn=True)
+# 方式一：自动模式（推荐）- 传入 session_id，自动维护 turn 状态
+payload = kernel.build_payload(
+    user_input="用户输入",
+    history_messages=[],
+    session_id="unique-session-id"  # 首次调用自动判定为首轮
+)
+anchor = payload["anchor"]  # 锚点独立携带，可自行决定如何附加
 
-# 后续对话
-payload = kernel.build_payload("用户输入", history=messages, is_first_turn=False)
+# 方式二：手动模式 - 自行维护 is_first_turn
+payload = kernel.build_payload(
+    user_input="用户输入",
+    history_messages=messages,
+    is_first_turn=False
+)
+
+# 获取锚点（不污染用户原文）
+anchor = kernel.get_anchor(is_first_turn=True)  # " [⚡首次加载准则] [⚡准则锚点：按初始准则执行]"
 ```
 
 ## 触发条件
 
 每轮对话通过 `[⚡准则锚点：按初始准则执行]` 后缀自动激活。
+
+## 已知限制
+
+1. **后缀污染**：当前版本将锚点追加到 user 消息 content 中，
+   如需原文干净（用于存档/敏感词过滤），请使用 `get_anchor()` 自行附加。
+2. **首轮判定**：手动模式下依赖调用方传入正确的 `is_first_turn`，
+   建议使用 `session_id` 自动模式以避免错误。
