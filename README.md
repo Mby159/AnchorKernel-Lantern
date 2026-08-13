@@ -61,7 +61,15 @@ payload = kernel.build_payload(
 )
 ```
 
-### 发送给 LLM vs 存档
+### 发送给 LLM vs 存档（重要）
+
+```
+history（下一轮传入 + 存档）  ←── 始终用 messages_clean
+送 LLM                       ←── 用 messages_for_llm，或 apply_anchor(history, anchor)
+```
+
+> ⚠️ `messages_for_llm` 是"投递版"——用完即弃，不能作 history。
+> `messages_clean` 是"记忆版"——持续流动，始终干净。
 
 ```python
 payload = kernel.build_payload("用户输入", history_messages, session_id="chat")
@@ -72,8 +80,8 @@ llm_messages = payload["messages_for_llm"]
 # 存档（原文干净，无锚点污染）
 archive = payload["messages_clean"]
 
-# 下轮对话：用 messages_for_llm 作为 history 送 LLM
-# 存档用 messages_clean 存起来，两条路分开走
+# 下轮对话：history 用 messages_clean；messages_for_llm 仅在送 LLM 那一刻用
+history = archive
 ```
 
 ### 自行追加锚点（apply_anchor）
@@ -125,20 +133,23 @@ llm = kernel.apply_anchor(archive, payload["anchor"])
 多轮对话时，assistant 回复需要调用方自行追加到 history：
 
 ```python
-messages = []
+history = []
 
 for turn in range(1, 6):
-    payload = kernel.build_payload(f"第{turn}轮", messages, session_id="chat")
+    payload = kernel.build_payload(f"第{turn}轮", history, session_id="chat")
+
+    # 送给 LLM 用 messages_for_llm（已追加锚点）
     llm_messages = payload["messages_for_llm"]
 
     # --- 这里调用 LLM ---
     # response = llm.chat(llm_messages)
 
-    # 模拟 assistant 回复
+    # 模拟 assistant 回复（追加到 history，不是 llm_messages）
     llm_messages.append({"role": "assistant", "content": "Agent 回复"})
 
-    # 下轮用 llm_messages（带锚点版）作为 history
-    messages = llm_messages
+    # 下轮 history 用 messages_clean（始终干净）
+    # messages_for_llm 是"投递版"用完即弃，不能作 history
+    history = payload["messages_clean"]
 ```
 
 ## 已知限制

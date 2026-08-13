@@ -34,30 +34,36 @@ def demo_long_conversation():
     print("【长对话 - 历史消息干净】")
 
     kernel = AgentKernel()
-    messages_for_llm = []
-    messages_clean_archive = []
+    # 关键：history 始终用 messages_clean（干净版），messages_for_llm 只在送 LLM 那一刻用
+    history = []
 
     for turn in range(1, 4):
         payload = kernel.build_payload(
             f"第{turn}轮输入",
-            history_messages=messages_for_llm,  # 送 LLM 用的是 messages_for_llm
-            session_id=f"long-{turn}"
+            history_messages=history,
+            session_id="long-chat"  # 固定 session_id，turn 正常累加
         )
-        messages_for_llm = payload["messages_for_llm"]
-        messages_clean_archive = payload["messages_clean"]  # 存档用干净消息
 
-        print(f"Turn {turn}:")
-        print(f"  messages_for_llm user数: {sum(1 for m in messages_for_llm if m['role']=='user')}")
-        print(f"  messages_clean user数: {sum(1 for m in messages_clean_archive if m['role']=='user')}")
+        # 送 LLM 用 messages_for_llm（已追加锚点）
+        llm_messages = payload["messages_for_llm"]
+
+        # 模拟 assistant 回复（追加到 history，不是 llm_messages）
+        llm_messages.append({"role": "assistant", "content": f"Agent 第{turn}轮回复"})
+
+        # 下轮 history 用 messages_clean（始终干净）
+        # messages_for_llm 是"投递版"用完即弃，messages_clean 才是"记忆版"
+        history = payload["messages_clean"]
+
+        print(f"Turn {turn}: is_first={payload['is_first_turn']}, turn_count={payload['turn_count']}")
 
     # 验证历史干净
     print(f"\n历史消息中所有 user 消息（应为干净原文）：")
-    for m in messages_clean_archive:
+    for m in history:
         if m["role"] == "user":
             print(f"  - {m['content']}")
 
     # 验证存档无锚点
-    anchors_in_archive = any("⚡" in m["content"] for m in messages_clean_archive if m["role"] == "user")
+    anchors_in_archive = any("⚡" in m["content"] for m in history if m["role"] == "user")
     print(f"\n存档中是否有锚点污染: {'是 ❌' if anchors_in_archive else '无 ✅'}")
 
 
