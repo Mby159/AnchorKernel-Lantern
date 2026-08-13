@@ -20,14 +20,28 @@ _SESSION_TTL = 3600
 
 
 def _load_skill_content() -> str:
-    """加载 Skill 文件内容"""
+    """加载 Skill 文件内容（仅准则主体，过滤开发文档）"""
     try:
         with open(_SKILL_PATH, "r", encoding="utf-8") as f:
             content = f.read()
         lines = content.split("\n")
+        # 跳过第一行标题
         if lines and lines[0].startswith("# "):
             lines = lines[1:]
-        return "\n".join(lines).strip()
+
+        # 只保留 LLM 需要的章节（简介 / 核心准则 / 触发条件）
+        # 丢弃使用方式、已知限制等开发文档
+        keep_sections = {"简介", "核心准则", "触发条件"}
+        result = []
+        current_section = None
+        for line in lines:
+            if line.startswith("## "):
+                section_name = line[2:].strip()
+                current_section = section_name
+            if current_section is None or current_section in keep_sections:
+                result.append(line)
+
+        return "\n".join(result).strip()
     except FileNotFoundError:
         return ""
 
