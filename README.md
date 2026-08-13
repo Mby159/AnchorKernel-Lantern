@@ -145,11 +145,9 @@ for turn in range(1, 6):
     # response = llm.chat(llm_messages)
 
     # 模拟 assistant 回复（追加到 history，不是 llm_messages）
-    llm_messages.append({"role": "assistant", "content": "Agent 回复"})
-
-    # 下轮 history 用 messages_clean（始终干净）
-    # messages_for_llm 是"投递版"用完即弃，不能作 history
+    # llm_messages 是"投递版"用完即弃，assistant 要持久化进 history
     history = payload["messages_clean"]
+    history.append({"role": "assistant", "content": "Agent 回复"})
 ```
 
 ## 已知限制

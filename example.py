@@ -48,11 +48,9 @@ def demo_long_conversation():
         llm_messages = payload["messages_for_llm"]
 
         # 模拟 assistant 回复（追加到 history，不是 llm_messages）
-        llm_messages.append({"role": "assistant", "content": f"Agent 第{turn}轮回复"})
-
-        # 下轮 history 用 messages_clean（始终干净）
-        # messages_for_llm 是"投递版"用完即弃，messages_clean 才是"记忆版"
+        # llm_messages 是"投递版"用完即弃，assistant 要持久化进 history
         history = payload["messages_clean"]
+        history.append({"role": "assistant", "content": f"Agent 第{turn}轮回复"})
 
         print(f"Turn {turn}: is_first={payload['is_first_turn']}, turn_count={payload['turn_count']}")
 
