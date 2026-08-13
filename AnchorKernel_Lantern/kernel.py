@@ -34,11 +34,7 @@ def _load_skill_content() -> str:
 
 SKILL_CONTENT = _load_skill_content()
 
-SYSTEM_PROMPT_SUMMARY = (
-    "你是一个高性能执行Agent。已加载技能：General_Execution_Policy_v1。\n"
-    "红线：1.禁幻觉 2.用户优先（软冲突） 3.优先结构化输出。\n"
-    "后续每轮对话请关注 [⚡准则锚点] 提示。"
-)
+SYSTEM_PROMPT_SUMMARY = "已加载技能：General_Execution_Policy_v1。请严格遵循准则执行。"
 
 
 class AgentKernel:
@@ -89,11 +85,9 @@ class AgentKernel:
         """构建完整的 system prompt（包含 Skill 全文）"""
         if self._skill_content:
             return (
-                f"【技能加载：{self.skill_name}】\n\n"
+                f"【技能：{self.skill_name}】\n\n"
                 f"{self._skill_content}\n\n"
-                f"——\n"
-                f"请严格遵循上述准则执行。\n"
-                f"每轮对话请关注 [⚡准则锚点：按初始准则执行] 提示。"
+                f"每轮请关注 [⚡准则锚点：按初始准则执行]。"
             )
         return SYSTEM_PROMPT_SUMMARY
 
