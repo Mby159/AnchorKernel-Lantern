@@ -128,7 +128,7 @@ class AgentKernel:
 
         with self._lock:
             if session_id is not None:
-                self._cleanup_sessions()  # 入锁前先清理
+                self._cleanup_sessions()
                 info = self._sessions.get(session_id)
                 if info is None:
                     turn_count = 0
@@ -145,7 +145,7 @@ class AgentKernel:
                 turn_count = -1
 
         # 深拷贝，避免修改原始消息对象
-        messages = deepcopy(list(history_messages))
+        messages = deepcopy(history_messages)
 
         if is_first:
             messages = [m for m in messages if m.get("role") != "system"]
