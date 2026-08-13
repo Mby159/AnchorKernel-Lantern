@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anchor-kernel-lantern"
+version = "0.1.0"
+description = "AnchorKernel Lantern - 极简Agent执行准则强化内核"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Mby159", email = "2232447424@qq.com"}
+]
+keywords = ["agent", "llm", "prompt", "policy", "kernel"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/Mby159/AnchorKernel-Lantern"
+Repository = "https://github.com/Mby159/AnchorKernel-Lantern"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = "."
+include = ["AnchorKernel_Lantern", "AnchorKernel_Lantern.*"]

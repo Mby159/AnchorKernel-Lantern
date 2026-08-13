@@ -6,133 +6,142 @@ from AnchorKernel_Lantern import AgentKernel
 
 
 def demo_basic():
-    """基础用法演示（手动模式）"""
+    """基础用法演示（默认 keep_clean=True）"""
     kernel = AgentKernel()
 
-    # === 首轮对话 ===
     print("=" * 50)
-    print("【首轮对话 - 手动模式】")
-    payload = kernel.build_payload("今天天气怎么样？", history_messages=[], is_first_turn=True)
+    print("【首轮对话 - 默认行为（messages_clean）】")
+    payload = kernel.build_payload("今天天气怎么样？", [], session_id="basic-1")
 
-    for msg in payload["messages"]:
+    print(f"messages_clean（存档用，原文干净）:")
+    for msg in payload["messages_clean"]:
         content = msg["content"]
-        if len(content) > 100:
-            content = content[:100] + "..."
-        print(f"[{msg['role']}]: {content}")
+        if len(content) > 80:
+            content = content[:80] + "..."
+        print(f"  [{msg['role']}]: {content}")
 
-    # === 后续对话 ===
+    print(f"\nmessages_for_llm（送 LLM，追加锚点）:")
+    for msg in payload["messages_for_llm"]:
+        content = msg["content"]
+        if len(content) > 80:
+            content = content[:80] + "..."
+        print(f"  [{msg['role']}]: {content}")
+
+
+def demo_long_conversation():
+    """长对话：验证历史消息干净"""
     print("\n" + "=" * 50)
-    print("【第2轮对话】")
-    payload2 = kernel.build_payload(
-        "那明天呢？",
-        history_messages=payload["messages"],
-        is_first_turn=False,
+    print("【长对话 - 历史消息干净】")
+
+    kernel = AgentKernel()
+    messages_for_llm = []
+    messages_clean_archive = []
+
+    for turn in range(1, 4):
+        payload = kernel.build_payload(
+            f"第{turn}轮输入",
+            history_messages=messages_for_llm,  # 送 LLM 用的是 messages_for_llm
+            session_id=f"long-{turn}"
+        )
+        messages_for_llm = payload["messages_for_llm"]
+        messages_clean_archive = payload["messages_clean"]  # 存档用干净消息
+
+        print(f"Turn {turn}:")
+        print(f"  messages_for_llm user数: {sum(1 for m in messages_for_llm if m['role']=='user')}")
+        print(f"  messages_clean user数: {sum(1 for m in messages_clean_archive if m['role']=='user')}")
+
+    # 验证历史干净
+    print(f"\n历史消息中所有 user 消息（应为干净原文）：")
+    for m in messages_clean_archive:
+        if m["role"] == "user":
+            print(f"  - {m['content']}")
+
+    # 验证存档无锚点
+    anchors_in_archive = any("⚡" in m["content"] for m in messages_clean_archive if m["role"] == "user")
+    print(f"\n存档中是否有锚点污染: {'是 ❌' if anchors_in_archive else '无 ✅'}")
+
+
+def demo_apply_anchor():
+    """apply_anchor：送给 LLM 前临时追加锚点"""
+    print("\n" + "=" * 50)
+    print("【apply_anchor 临时追加锚点】")
+
+    kernel = AgentKernel()
+
+    payload = kernel.build_payload(
+        "别用JSON了，直接说人话",
+        [],
+        is_first_turn=True,
+        keep_clean=True,
     )
 
-    for msg in payload2["messages"]:
-        content = msg["content"]
-        if len(content) > 100:
-            content = content[:100] + "..."
-        print(f"[{msg['role']}]: {content}")
+    # 存档用 messages_clean（干净）
+    archive = payload["messages_clean"]
+    print(f"存档: {[m['content'] for m in archive if m['role']=='user']}")
+
+    # 送 LLM 前，手动用 apply_anchor
+    llm = kernel.apply_anchor(archive, payload["anchor"])
+    print(f"送LLM: {[m['content'] for m in llm if m['role']=='user']}")
+
+
+def demo_keep_clean_false():
+    """keep_clean=False：旧行为（向后兼容）"""
+    print("\n" + "=" * 50)
+    print("【keep_clean=False 旧行为】")
+
+    kernel = AgentKernel()
+
+    payload = kernel.build_payload(
+        "测试旧行为",
+        [],
+        is_first_turn=True,
+        keep_clean=False,
+    )
+
+    print(f"user content: {payload['messages'][-1]['content']}")
+    print("(锚点直接写进 content，向后兼容)")
 
 
 def demo_auto_mode():
-    """自动模式演示 - session_id 自动维护 turn 状态"""
+    """自动模式 - session_id 自动维护 turn"""
     print("\n" + "=" * 50)
     print("【自动模式 - session_id】")
 
     kernel = AgentKernel()
 
-    # 同一 session_id 会自动累加 turn
     for i in range(1, 4):
         payload = kernel.build_payload(
-            f"第{i}轮输入",
-            history_messages=[],
-            session_id="chat-001"  # 固定 session_id
+            f"第{i}轮",
+            [],
+            session_id="auto-1"
         )
         print(f"Turn {payload['turn_count']}: is_first={payload['is_first_turn']}")
 
-    # 新 session_id 会重新从首轮开始
     print("\n--- 新会话 ---")
-    payload = kernel.build_payload("新会话首轮", [], session_id="chat-002")
+    payload = kernel.build_payload("新会话首轮", [], session_id="auto-2")
     print(f"Turn {payload['turn_count']}: is_first={payload['is_first_turn']}")
 
 
-def demo_get_anchor():
-    """锚点独立使用 - 原文干净场景"""
-    print("\n" + "=" * 50)
-    print("【锚点独立使用 - 原文干净】")
-
-    kernel = AgentKernel()
-
-    # 场景：存档/敏感词过滤需要用户原文干净
-    original_input = "别用JSON了，直接说人话"
-
-    # 方式一：用 get_anchor() 自己拼接
-    anchor = kernel.get_anchor(is_first_turn=True)
-    clean_for_llm = original_input + anchor  # 仅送给 LLM
-    archive_storage = original_input           # 原文存档，不带锚点
-
-    print(f"原文存档: {archive_storage}")
-    print(f"送给LLM: {clean_for_llm}")
-
-    # 方式二：用 build_payload 返回的 anchor 字段
-    payload = kernel.build_payload(original_input, [], session_id="clean-demo")
-    print(f"\n返回的 anchor: {payload['anchor_for_first_turn']}")
-    print(f"messages里的content（向后兼容）: {payload['messages'][-1]['content']}")
-
-
-def demo_long_conversation():
-    """模拟长对话（20+ 轮）- 验证 System 仅首轮注入"""
-    print("\n" + "=" * 50)
-    print("【长对话模拟 - 前5轮】")
-
-    kernel = AgentKernel()
-    messages = []
-
-    for turn in range(1, 6):
-        payload = kernel.build_payload(
-            f"用户第{turn}轮输入",
-            history_messages=messages,
-            session_id="long-chat"  # 固定 session_id，同一会话累加 turn
-        )
-        messages = payload["messages"]
-
-        # 模拟 assistant 回复
-        messages.append({
-            "role": "assistant",
-            "content": f"Agent 第{turn}轮回复：感谢您的提问。",
-        })
-
-        print(f"Turn {turn}: is_first={payload['is_first_turn']}, system_count={sum(1 for m in messages if m['role']=='system')}")
-
-    # 验证 System 仅在首轮存在
-    system_count = sum(1 for m in messages if m['role'] == 'system')
-    print(f"\nSystem 消息数量: {system_count} (应为 1)")
-
-
 def demo_session_management():
-    """会话管理 - 重置、自动清理"""
+    """会话管理 - reset_session"""
     print("\n" + "=" * 50)
     print("【会话管理】")
 
     kernel = AgentKernel()
 
-    # 正常会话
     p1 = kernel.build_payload("输入", [], session_id="session-a")
     print(f"session-a turn1: {p1['turn_count']}")
 
     p2 = kernel.build_payload("输入", [], session_id="session-a")
     print(f"session-a turn2: {p2['turn_count']}")
 
-    # 手动重置
     kernel.reset_session("session-a")
     p3 = kernel.build_payload("输入", [], session_id="session-a")
     print(f"session-a after reset: turn={p3['turn_count']}, is_first={p3['is_first_turn']}")
 
 
 def demo_hallucination_prevention():
-    """防幻觉场景 - 锚点触发"""
+    """防幻觉场景"""
     print("\n" + "=" * 50)
     print("【防幻觉场景】")
 
@@ -140,19 +149,20 @@ def demo_hallucination_prevention():
 
     payload = kernel.build_payload(
         "根据2024年Q3财报，公司营收是多少？",
-        history_messages=[],
+        [],
         is_first_turn=True,
     )
 
-    user_msg = payload["messages"][-1]["content"]
+    user_msg = payload["messages_for_llm"][-1]["content"]
     print(f"用户消息: {user_msg}")
     print("→ Agent 应回复「资料不足，无法确认」")
 
 
 if __name__ == "__main__":
     demo_basic()
-    demo_auto_mode()
-    demo_get_anchor()
     demo_long_conversation()
+    demo_apply_anchor()
+    demo_keep_clean_false()
+    demo_auto_mode()
     demo_session_management()
     demo_hallucination_prevention()

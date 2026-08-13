@@ -4,63 +4,109 @@
 
 极简、无侵入、低成本的 Agent 执行准则强化内核。
 
+## 安装
+
+```bash
+pip install anchor-kernel-lantern
+```
+
+或开发模式：
+
+```bash
+git clone https://github.com/Mby159/AnchorKernel-Lantern.git
+cd AnchorKernel-Lantern
+pip install -e .
+```
+
 ## 目录结构
 
 ```
-AnchorKernel_Lantern/
-├── __init__.py          # 包入口
-├── kernel.py            # 核心 AgentKernel 类
-├── example.py           # 使用示例
-├── README.md            # 本文件
-└── skill/
-    └── General_Execution_Policy_v1.md   # 执行准则 Skill（完整内容注入 System Prompt）
+AnchorKernel_Lantern/           # 注意：目录名含连字符，Python 包名为 anchor_kernel_lantern
+├── AnchorKernel_Lantern/       # Python 包（含 __init__.py）
+│   ├── __init__.py
+│   ├── kernel.py
+│   └── skill/
+│       └── General_Execution_Policy_v1.md
+├── example.py                  # 使用示例
+├── pyproject.toml
+└── README.md
 ```
+
+> ⚠️ 仓库目录名为 `AnchorKernel-Lantern`（连字符），但 Python 包名不允许连字符。
+> 安装后包名为 `anchor_kernel_lantern`，import 时用 `from anchor_kernel_lantern import AgentKernel`。
 
 ## 快速开始
 
 ```python
-from AnchorKernel_Lantern import AgentKernel
+from anchor_kernel_lantern import AgentKernel
 
 kernel = AgentKernel()
 
-# 方式一：自动模式（推荐）—— 传入 session_id，自动维护 turn 状态
+# 方式一：自动模式（推荐）- 传入 session_id，自动维护 turn 状态
 payload = kernel.build_payload(
     user_input="用户输入",
     history_messages=[],
     session_id="unique-session-id"
 )
-anchor = payload["anchor"]  # 锚点独立携带，可自行决定如何附加
+# messages_for_llm 追加了锚点，送 LLM 用这个
+# messages_clean 原文干净，用于存档
+llm_messages = payload["messages_for_llm"]
+clean_archive = payload["messages_clean"]
 
-# 方式二：手动模式 —— 自行维护 is_first_turn
+# 方式二：手动模式
 payload = kernel.build_payload(
     user_input="用户输入",
     history_messages=messages,
     is_first_turn=False
 )
+```
 
-messages = payload["messages"]
+### 发送给 LLM vs 存档
+
+```python
+payload = kernel.build_payload("用户输入", history_messages, session_id="chat")
+
+# 送给 LLM（追加了锚点）
+llm_messages = payload["messages_for_llm"]
+
+# 存档（原文干净，无锚点污染）
+archive = payload["messages_clean"]
+
+# 下轮对话：用 messages_for_llm 作为 history 送 LLM
+# 存档用 messages_clean 存起来，两条路分开走
+```
+
+### 自行追加锚点（apply_anchor）
+
+如果调用方想完全控制锚点追加时机：
+
+```python
+payload = kernel.build_payload("用户输入", history, session_id="chat", keep_clean=True)
+
+# 存档用 messages_clean（干净）
+archive = payload["messages_clean"]
+
+# 送 LLM 前，手动 apply_anchor
+llm = kernel.apply_anchor(archive, payload["anchor"])
 ```
 
 ## 核心机制
 
 | 机制 | 时机 | 内容 |
 |------|------|------|
-| System Prompt | 仅首轮 | 完整 Skill 内容拼入，约 200 字 |
-| User 后缀 | 每轮 | 约 12 字，`[⚡准则锚点：按初始准则执行]` |
-| 双重后缀 | 首轮用户 | `首轮额外后缀 + 锚点后缀` |
+| System Prompt | 仅首轮 | 完整 Skill 内容拼入 |
+| User 锚点 | 送 LLM 前 | `[⚡准则锚点：按初始准则执行]` |
+| 原文存档 | 全程 | messages_clean 保持干净 |
 
-## 关键特性
+## 关键设计：双轨消息
 
-### Skill 内容对 LLM 可见
-`General_Execution_Policy_v1.md` 的完整内容会在首轮拼入 System Prompt，
-LLM 实际看到的是完整的 5 条准则，而非仅一个名字。
+`keep_clean=True`（默认）时，`build_payload` 返回三个消息列表：
 
-### 锚点独立携带
-`build_payload` 返回的 payload 中包含独立的 `anchor` 字段，
-如需原文干净（存档/敏感词过滤场景），可自行决定如何附加。
+- `messages`（向后兼容）：等于 `messages_for_llm`
+- `messages_for_llm`：最后一条 user 追加了锚点，送 LLM 用
+- `messages_clean`：最后一条 user 是原文，存档用
 
-### 自动 turn 状态
-传入 `session_id` 后，内核自动维护会话状态，无需自行判断首轮。
+这样对话历史始终干净，锚点只在「送给 LLM 的那一瞬间」生效。
 
 ## 对接框架
 
@@ -73,16 +119,36 @@ LLM 实际看到的是完整的 5 条准则，而非仅一个名字。
 ### 原生 OpenAI SDK
 每次 `client.chat.completions.create` 前调用。
 
+## 注意：assistant 回复需要调用方自行追加
+
+`build_payload` 只负责处理 user 消息和 system prompt。
+多轮对话时，assistant 回复需要调用方自行追加到 history：
+
+```python
+messages = []
+
+for turn in range(1, 6):
+    payload = kernel.build_payload(f"第{turn}轮", messages, session_id="chat")
+    llm_messages = payload["messages_for_llm"]
+
+    # --- 这里调用 LLM ---
+    # response = llm.chat(llm_messages)
+
+    # 模拟 assistant 回复
+    llm_messages.append({"role": "assistant", "content": "Agent 回复"})
+
+    # 下轮用 llm_messages（带锚点版）作为 history
+    messages = llm_messages
+```
+
 ## 已知限制
 
-1. **后缀污染**：当前版本将锚点追加到 user 消息 content 中，
-   如需原文干净（用于存档/敏感词过滤），请使用 `get_anchor()` 自行附加。
-2. **首轮判定**：手动模式下依赖调用方传入正确的 `is_first_turn`，
-   建议使用 `session_id` 自动模式以避免错误。
+1. **手动模式首轮判定**：依赖调用方传入正确的 `is_first_turn`，建议用 `session_id` 自动模式。
+2. **keep_clean=False 时仍有污染**：设为 False 则 anchor 写进 content，向后兼容但会污染历史。
 
 ## 运行示例
 
 ```bash
-cd AnchorKernel_Lantern
-python example.py
+pip install -e .
+python -m anchor_kernel_lantern.example
 ```

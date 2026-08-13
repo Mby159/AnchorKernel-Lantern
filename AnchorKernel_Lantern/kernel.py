@@ -15,8 +15,8 @@ _SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 _SKILL_PATH = os.path.join(_SKILL_DIR, "skill", "General_Execution_Policy_v1.md")
 
 # 会话清理阈值
-_MAX_SESSIONS = 1000      # 最多维护这么多会话，超出后清理最老的
-_SESSION_TTL = 3600       # 会话 TTL（秒），超时后自动清理
+_MAX_SESSIONS = 1000
+_SESSION_TTL = 3600
 
 
 def _load_skill_content() -> str:
@@ -62,7 +62,6 @@ class AgentKernel:
     ):
         self.skill_name = skill_name
         self._skill_content = skill_content or SKILL_CONTENT
-        # session_id -> {"turn": int, "last_active": float (timestamp)}
         self._sessions: Dict[str, Dict[str, Any]] = {}
         self._max_sessions = max_sessions
         self._session_ttl = session_ttl
@@ -78,7 +77,6 @@ class AgentKernel:
         for sid in expired:
             del self._sessions[sid]
 
-        # 超出上限，清理最老的
         if len(self._sessions) > self._max_sessions:
             sorted_sessions = sorted(
                 self._sessions.items(),
@@ -105,21 +103,26 @@ class AgentKernel:
         history_messages: List[Dict[str, Any]],
         is_first_turn: bool = False,
         session_id: Optional[str] = None,
+        keep_clean: bool = True,
     ) -> Dict[str, Any]:
         """
         构建每次 LLM 调用的 payload
 
         Args:
             user_input: 用户原始输入
-            history_messages: 消息历史列表
+            history_messages: 消息历史列表（应为历史中干净的消息）
             is_first_turn: 是否为首轮（手动模式，与 session_id 二选一）
             session_id: 会话 ID（自动模式，推荐使用）
+            keep_clean: True（默认）- messages 存原文，anchor 字段独立携带，
+                        送给 LLM 前需调用 apply_anchor() 追加后缀。
+                        False - 旧行为，anchor 直接写进 content（向后兼容）。
 
         Returns:
             {
-                "messages": [...],          # 处理后的消息列表
-                "anchor": str,              # 常规锚点
-                "anchor_for_first_turn": str, # 首轮锚点（含首次加载标记）
+                "messages": [...],              # 处理后的消息列表
+                "messages_clean": [...],        # 仅在 keep_clean=True 时返回，内容同 messages（用户原文干净）
+                "messages_for_llm": [...],      # 仅在 keep_clean=True 时返回，已追加锚点的版本
+                "anchor": str,                  # 本轮使用的锚点
                 "is_first_turn": bool,
                 "turn_count": int,
             }
@@ -144,7 +147,6 @@ class AgentKernel:
                 is_first = is_first_turn
                 turn_count = -1
 
-        # 深拷贝，避免修改原始消息对象
         messages = deepcopy(history_messages)
 
         if is_first:
@@ -155,18 +157,49 @@ class AgentKernel:
         if is_first:
             anchor = self.FIRST_TURN_SUFFIX + self.ANCHOR_SUFFIX
 
-        # 直接追加新的 user 消息（锚点追加到 content 是为了向后兼容）
-        # 注：如需原文干净，调用方应使用返回的 anchor 字段自行处理，
-        # messages 中追加的是 user_input + anchor（向后兼容模式）。
-        messages.append({"role": "user", "content": user_input + anchor})
+        if keep_clean:
+            # 新行为：messages 存原文（干净），锚点独立携带
+            clean_messages = deepcopy(messages)
+            clean_messages.append({"role": "user", "content": user_input})
 
-        return {
-            "messages": messages,
-            "anchor": self.ANCHOR_SUFFIX,
-            "anchor_for_first_turn": self.FIRST_TURN_SUFFIX + self.ANCHOR_SUFFIX,
-            "is_first_turn": is_first,
-            "turn_count": turn_count + 1 if turn_count >= 0 else -1,
-        }
+            # LLM 版本：临时追加锚点（不污染原始 messages）
+            llm_messages = deepcopy(messages)
+            llm_messages.append({"role": "user", "content": user_input + anchor})
+
+            return {
+                "messages": llm_messages,  # 向后兼容：默认仍返回带锚点的版本
+                "messages_clean": clean_messages,
+                "messages_for_llm": llm_messages,
+                "anchor": anchor,
+                "is_first_turn": is_first,
+                "turn_count": turn_count + 1 if turn_count >= 0 else -1,
+            }
+        else:
+            # 旧行为：anchor 直接写进 content（向后兼容）
+            messages.append({"role": "user", "content": user_input + anchor})
+            return {
+                "messages": messages,
+                "anchor": anchor,
+                "is_first_turn": is_first,
+                "turn_count": turn_count + 1 if turn_count >= 0 else -1,
+            }
+
+    def apply_anchor(
+        self,
+        messages: List[Dict[str, Any]],
+        anchor: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        将锚点追加到 messages 中最后一条 user 消息的 content。
+        用于 keep_clean=True 时，在「送给 LLM 前」临时追加后缀，
+        而不污染原始 messages（用于存档/历史）。
+        """
+        messages = deepcopy(messages)
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                messages[i]["content"] = messages[i]["content"] + anchor
+                break
+        return messages
 
     def get_anchor(self, is_first_turn: bool = False) -> str:
         """仅获取锚点字符串（不处理 messages）"""
@@ -201,6 +234,7 @@ def build_payload(
     history_messages: List[Dict[str, Any]],
     is_first_turn: bool = False,
     session_id: Optional[str] = None,
+    keep_clean: bool = True,
 ) -> Dict[str, Any]:
     """便捷函数：构建 payload"""
-    return get_kernel().build_payload(user_input, history_messages, is_first_turn, session_id)
+    return get_kernel().build_payload(user_input, history_messages, is_first_turn, session_id, keep_clean)
